@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "109697453530",
+    "project_id": "safepull-52920",
+    "storage_bucket": "safepull-52920.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:109697453530:android:3d0edf7c8401e593aac4e3",
+        "android_client_info": {
+          "package_name": "com.example.safepull"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAYdcaDWuliE7LnsdaoPydK4czpL_7Jrug"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
