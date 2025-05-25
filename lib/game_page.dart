@@ -7,7 +7,6 @@ import 'package:intl/intl.dart';
 
 class GamePage extends StatefulWidget {
   final FirebaseAnalytics analytics;
-
   const GamePage({super.key, required this.analytics});
 
   @override
@@ -15,39 +14,40 @@ class GamePage extends StatefulWidget {
 }
 
 class _GamePageState extends State<GamePage> {
-  List<FlSpot> _spots = [];
-  List<String> _timestamps = [];
-  double _currentX = 0;
-  double _marketValue = 1.0;
-  bool _isBetPlaced = false;
-  bool _isGameRunning = false;
-  Timer? _timer;
-  Timer? _countdownTimer;
-  int _countdownSeconds = 30;
+  final List<FlSpot> _spots = [];
+  final List<String> _timestamps = [];
+  final TextEditingController _betController = TextEditingController();
   final Random _random = Random();
 
-  final TextEditingController _betController = TextEditingController();
-  double _betAmount = 0.0;
+  Timer? _timer;
+  Timer? _countdownTimer;
+
   double _wallet = 1000.0;
+  double _betAmount = 0.0;
+  double _marketValue = 1.0;
+  double _currentX = 0;
+
+  bool _isGameRunning = false;
+  bool _isBetPlaced = false;
+
+  int _countdownSeconds = 30;
+
+  // Format current time
+  String _formattedTime() => DateFormat.Hms().format(DateTime.now());
 
   Future<void> _logEvent(String name, {Map<String, Object>? parameters}) async {
     await widget.analytics.logEvent(name: name, parameters: parameters);
   }
 
   void _startGame() async {
-    if (_isGameRunning) return;
+    final input = _betController.text.trim();
+    final bet = double.tryParse(input);
 
-    final betInput = _betController.text.trim();
-    final bet = double.tryParse(betInput);
-    if (bet == null || bet <= 0) {
+    if (_isGameRunning || bet == null || bet <= 0 || bet > _wallet) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter a valid bet amount')),
-      );
-      return;
-    }
-    if (bet > _wallet) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Insufficient wallet balance')),
+        SnackBar(content: Text(bet == null || bet <= 0
+            ? 'Enter a valid bet amount'
+            : 'Insufficient wallet balance')),
       );
       return;
     }
@@ -55,12 +55,14 @@ class _GamePageState extends State<GamePage> {
     setState(() {
       _betAmount = bet;
       _wallet -= bet;
-      _spots = [FlSpot(0, 1.0)];
-      _timestamps = [_formattedTime()];
-      _currentX = 0;
       _marketValue = 1.0;
-      _isBetPlaced = true;
+      _currentX = 0;
+      _spots.clear();
+      _timestamps.clear();
+      _spots.add(FlSpot(0, _marketValue));
+      _timestamps.add(_formattedTime());
       _isGameRunning = true;
+      _isBetPlaced = true;
       _countdownSeconds = 30;
     });
 
@@ -69,19 +71,23 @@ class _GamePageState extends State<GamePage> {
       'wallet_balance': _wallet,
     });
 
+    _startTimers();
+  }
+
+  void _startTimers() {
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       setState(() {
-        double change = (_random.nextDouble() * 0.3) - 0.15;
-        _marketValue += change;
-        if (_marketValue < 0.5) _marketValue = 0.5;
+        final change = (_random.nextDouble() * 0.3) - 0.15;
+        _marketValue = max(0.5, _marketValue + change);
         _currentX += 1;
+
         _spots.add(FlSpot(_currentX, _marketValue));
         _timestamps.add(_formattedTime());
 
         if (_spots.length > 20) {
           _spots.removeAt(0);
           _timestamps.removeAt(0);
-          _spots = _spots.map((spot) => FlSpot(spot.x - 1, spot.y)).toList();
+          _spots.setAll(0, _spots.map((e) => FlSpot(e.x - 1, e.y)));
           _currentX -= 1;
         }
 
@@ -93,16 +99,15 @@ class _GamePageState extends State<GamePage> {
 
     _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       setState(() {
-        if (_countdownSeconds > 0) {
-          _countdownSeconds--;
-        } else {
+        _countdownSeconds--;
+        if (_countdownSeconds <= 0) {
           _endGame(crashed: true);
         }
       });
     });
   }
 
-  void _endGame({bool crashed = false}) async {
+  void _endGame({required bool crashed}) async {
     _timer?.cancel();
     _countdownTimer?.cancel();
 
@@ -112,24 +117,17 @@ class _GamePageState extends State<GamePage> {
         'wallet_balance': _wallet,
       });
 
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (_) => ResultsPage(
-            wallet: _wallet,
-            resultText: 'Game crashed! You lost your bet of KES ${_betAmount.toStringAsFixed(2)}.',
-            isWin: false,
-            analytics: widget.analytics,
-          ),
-        ),
+      _showResult(
+        success: false,
+        message: 'Game crashed!\nYou lost your bet of KES ${_betAmount.toStringAsFixed(2)}.',
       );
     } else {
       setState(() {
         _isGameRunning = false;
         _isBetPlaced = false;
-        _spots = [];
-        _timestamps = [];
         _marketValue = 1.0;
+        _spots.clear();
+        _timestamps.clear();
       });
     }
   }
@@ -146,9 +144,9 @@ class _GamePageState extends State<GamePage> {
       _wallet += winnings;
       _isGameRunning = false;
       _isBetPlaced = false;
-      _spots = [];
-      _timestamps = [];
       _marketValue = 1.0;
+      _spots.clear();
+      _timestamps.clear();
     });
 
     await _logEvent('game_pull_out', parameters: {
@@ -158,21 +156,28 @@ class _GamePageState extends State<GamePage> {
       'wallet_balance': _wallet,
     });
 
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(
-        builder: (_) => ResultsPage(
-          wallet: _wallet,
-          resultText: 'You pulled out in time!\nWinnings: KES ${winnings.toStringAsFixed(2)}',
-          isWin: true,
-          analytics: widget.analytics,
-        ),
-      ),
+    _showResult(
+      success: true,
+      message: 'You pulled out in time!\nWinnings: KES ${winnings.toStringAsFixed(2)}',
     );
   }
 
-  String _formattedTime() {
-    return DateFormat.Hms().format(DateTime.now());
+  void _showResult({required bool success, required String message}) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF1E2A40),
+        title: Text(success ? 'Success' : 'Crashed',
+            style: TextStyle(color: success ? Colors.greenAccent : Colors.redAccent)),
+        content: Text(message, style: const TextStyle(color: Colors.white)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK', style: TextStyle(color: Colors.cyanAccent)),
+          )
+        ],
+      ),
+    );
   }
 
   Widget _buildMarketGraph() {
@@ -187,6 +192,7 @@ class _GamePageState extends State<GamePage> {
         LineChartData(
           minY: 0.4,
           maxY: 2.0,
+          gridData: FlGridData(show: true, drawVerticalLine: true, drawHorizontalLine: true),
           titlesData: FlTitlesData(
             bottomTitles: AxisTitles(
               sideTitles: SideTitles(
@@ -217,18 +223,7 @@ class _GamePageState extends State<GamePage> {
             topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
             rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
           ),
-          gridData: FlGridData(
-            show: true,
-            drawVerticalLine: true,
-            drawHorizontalLine: true,
-            horizontalInterval: 0.2,
-            getDrawingHorizontalLine: (_) => FlLine(color: Colors.white10),
-            getDrawingVerticalLine: (_) => FlLine(color: Colors.white10),
-          ),
-          borderData: FlBorderData(
-            show: true,
-            border: Border.all(color: Colors.white24),
-          ),
+          borderData: FlBorderData(show: true, border: Border.all(color: Colors.white24)),
           lineBarsData: [
             LineChartBarData(
               spots: _spots,
@@ -238,15 +233,10 @@ class _GamePageState extends State<GamePage> {
               dotData: FlDotData(
                 show: true,
                 checkToShowDot: (spot, _) => spot == _spots.last,
-                getDotPainter: (spot, percent, barData, index) => FlDotCirclePainter(
-                  radius: 6,
-                  color: Colors.white,
-                  strokeWidth: 0,
-                ),
               ),
               belowBarData: BarAreaData(
                 show: true,
-                color: Colors.cyanAccent.withAlpha((0.2 * 255).toInt()),
+                color: Colors.cyanAccent.withOpacity(0.2),
               ),
             ),
           ],
@@ -276,10 +266,10 @@ class _GamePageState extends State<GamePage> {
             child: Center(
               child: Text(
                 'Wallet: KES ${_wallet.toStringAsFixed(2)}',
-                style: const TextStyle(fontSize: 18, color: Colors.white),
+                style: const TextStyle(fontSize: 16, color: Colors.white),
               ),
             ),
-          )
+          ),
         ],
       ),
       body: Padding(
@@ -289,10 +279,8 @@ class _GamePageState extends State<GamePage> {
             _buildMarketGraph(),
             const SizedBox(height: 20),
             if (_isGameRunning)
-              Text(
-                'Time Left: $_countdownSeconds seconds',
-                style: const TextStyle(fontSize: 18, color: Colors.white),
-              ),
+              Text('Time Left: $_countdownSeconds s',
+                  style: const TextStyle(fontSize: 18, color: Colors.white)),
             const SizedBox(height: 10),
             if (!_isGameRunning)
               TextField(
@@ -300,10 +288,10 @@ class _GamePageState extends State<GamePage> {
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 style: const TextStyle(color: Colors.white),
                 decoration: const InputDecoration(
-                  border: OutlineInputBorder(),
                   labelText: 'Enter Bet Amount (KES)',
                   labelStyle: TextStyle(color: Colors.white70),
                   prefixIcon: Icon(Icons.money, color: Colors.white70),
+                  border: OutlineInputBorder(),
                   enabledBorder: OutlineInputBorder(
                     borderSide: BorderSide(color: Colors.white24),
                   ),
@@ -319,85 +307,18 @@ class _GamePageState extends State<GamePage> {
                 if (!_isGameRunning)
                   ElevatedButton(
                     onPressed: _startGame,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
-                    ),
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
                     child: const Text('Start Game'),
                   ),
                 if (_isGameRunning)
                   ElevatedButton(
                     onPressed: _pullOut,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.orange,
-                    ),
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
                     child: const Text('Pull Out'),
                   ),
               ],
-            )
+            ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-// Stub for ResultsPage – replace this with your actual page if defined elsewhere.
-class ResultsPage extends StatelessWidget {
-  final double wallet;
-  final String resultText;
-  final bool isWin;
-  final FirebaseAnalytics analytics;
-
-  const ResultsPage({
-    super.key,
-    required this.wallet,
-    required this.resultText,
-    required this.isWin,
-    required this.analytics,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF0B1321),
-      appBar: AppBar(
-        title: const Text('Game Result'),
-        backgroundColor: const Color(0xFF1C2942),
-      ),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                resultText,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: isWin ? Colors.greenAccent : Colors.redAccent,
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 20),
-              Text(
-                'Wallet: KES ${wallet.toStringAsFixed(2)}',
-                style: const TextStyle(color: Colors.white70, fontSize: 16),
-              ),
-              const SizedBox(height: 30),
-              ElevatedButton(
-                onPressed: () {
-                  Navigator.pushReplacement(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => GamePage(analytics: analytics),
-                    ),
-                  );
-                },
-                child: const Text('Play Again'),
-              ),
-            ],
-          ),
         ),
       ),
     );
