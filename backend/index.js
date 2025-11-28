@@ -111,19 +111,66 @@ app.post("/withdrawMpesa", async (req, res) => {
   }
 });
 
-app.post("/mpesaCallback", (req, res) => {
+app.post("/mpesaCallback", async (req, res) => {
   console.log("M-Pesa Callback Received:", JSON.stringify(req.body, null, 2));
+  
+  try {
+    const { Body } = req.body;
+    
+    if (Body && Body.stkCallback) {
+      const { ResultCode, ResultDesc, CallbackMetadata } = Body.stkCallback;
+      
+      if (ResultCode === 0 && CallbackMetadata) {
+        // Payment successful
+        const items = CallbackMetadata.CallbackMetadataItem;
+        const amount = items.find(item => item.Name === "Amount")?.Value;
+        const mpesaReceiptNumber = items.find(item => item.Name === "MpesaReceiptNumber")?.Value;
+        const phoneNumber = items.find(item => item.Name === "PhoneNumber")?.Value;
+        
+        console.log("✅ Payment Success:", { amount, mpesaReceiptNumber, phoneNumber });
+        
+        // Here you would update Firestore via Firebase Admin SDK
+        // For now, we'll just log it
+        // TODO: Initialize Firebase Admin and update transaction status
+        
+      } else {
+        console.log("❌ Payment Failed:", ResultDesc);
+      }
+    }
+  } catch (error) {
+    console.error("Error processing callback:", error);
+  }
+  
   res.status(200).send("Callback received successfully");
 });
 
-app.post("/b2cResult", (req, res) => {
+app.post("/b2cResult", async (req, res) => {
   console.log("M-Pesa B2C Result:", JSON.stringify(req.body, null, 2));
-  // TODO: Update DB with withdrawal status
+  
+  try {
+    const { Result } = req.body;
+    
+    if (Result) {
+      const { ResultCode, ResultDesc, TransactionID } = Result;
+      
+      if (ResultCode === 0) {
+        console.log("✅ Withdrawal Success:", TransactionID);
+        // TODO: Update Firestore transaction status to completed
+      } else {
+        console.log("❌ Withdrawal Failed:", ResultDesc);
+        // TODO: Update Firestore transaction status to failed and refund user
+      }
+    }
+  } catch (error) {
+    console.error("Error processing B2C result:", error);
+  }
+  
   res.status(200).send("B2C Result received");
 });
 
 app.post("/timeout", (req, res) => {
   console.log("M-Pesa B2C Timeout:", JSON.stringify(req.body, null, 2));
+  // TODO: Mark transaction as failed and refund user
   res.status(200).send("Timeout received");
 });
 

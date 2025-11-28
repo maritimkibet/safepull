@@ -43,3 +43,24 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Backend
+backend/node_modules/
+backend/.env
+backend/serviceAccountKey.json
+backend/*.log
+
+# Firebase
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+
+# Environment files
+.env
+.env.local
+.env.production
+
+# Sensitive data
+serviceAccountKey.json
+**/serviceAccountKey.json
